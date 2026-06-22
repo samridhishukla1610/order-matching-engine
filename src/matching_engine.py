@@ -27,6 +27,20 @@ class MatchingEngine:
         self.book = OrderBook()
         self.trades: list[Trade] = []
 
+    # ------------------------------------------------------------------
+    # Wash-trade detection (Fix 1)
+    # ------------------------------------------------------------------
+    def _player_has_order_at(self, price, side, portfolio, ticker) -> bool:
+        """Return True if the player already has a resting order at this price/side."""
+        for oid, (order, t) in portfolio.open_orders.items():
+            if (t == ticker
+                    and order.side == side
+                    and order.price == price
+                    and not order.cancelled
+                    and not order.is_filled()):
+                return True
+        return False
+
     def process_order(
         self,
         order: Order,
@@ -34,6 +48,90 @@ class MatchingEngine:
         ticker: str = "",
         is_player_order: bool = False,
     ) -> list[Trade]:
+        """
+        Match an incoming order against the book; rest any unfilled LIMIT remainder.
+
+        If `portfolio` and `is_player_order` are supplied, fills are applied to the
+        portfolio so cash / position are updated in real time.
+
+        Raises ValueError on a wash-trade attempt (player order crossing their own
+        resting order on the opposite side).
+        """
+        new_trades = []
+        opposite_side = Side.SELL if order.side == Side.BUY else Side.BUY
+
+        # Fix 1 — Wash trade prevention
+        if is_player_order and portfolio is not None and ticker:
+            best_opposite = self.book.best_price(opposite_side)
+            if best_opposite and self._player_has_order_at(
+                best_opposite, opposite_side, portfolio, ticker
+            ):
+                raise ValueError(
+                    f"Wash trade rejected: you have a resting "
+                    f"{opposite_side.value} at ₹{best_opposite:,.2f}. "
+                    f"Cancel it first."
+                )
+
+        while order.remaining > 0:
+            best_price = self.book.best_price(opposite_side)
+            if best_price is None:
+                break  # no liquidity available on the other side
+
+            if order.order_type == OrderType.LIMIT:
+                crosses = (order.price >= best_price) if order.side == Side.BUY \
+                    else (order.price <= best_price)
+                if not crosses:
+                    break  # best opposite price isn't good enough for this limit order
+
+            level = self.book.levels_for(opposite_side)[best_price]
+
+            while level and order.remaining > 0:
+                resting = level[0]
+                if resting.cancelled or resting.is_filled():
+                    level.popleft()
+                    continue
+
+                fill_qty = min(order.remaining, resting.remaining)
+                order.remaining -= fill_qty
+                resting.remaining -= fill_qty
+
+                buy_id = order.order_id if order.side == Side.BUY else resting.order_id
+                sell_id = order.order_id if order.side == Side.SELL else resting.order_id
+
+                trade = Trade(
+                    trade_id=next(_trade_id_seq),
+                    buy_order_id=buy_id,
+                    sell_order_id=sell_id,
+                    price=best_price,
+                    quantity=fill_qty,
+                    seq=order.arrival_seq,
+                )
+                new_trades.append(trade)
+
+                # Credit the fill to the player's portfolio if this is their order
+                if is_player_order and portfolio is not None and ticker:
+                    portfolio.apply_fill(trade, order.side, ticker)
+
+                if resting.is_filled():
+                    level.popleft()
+
+            if not level:
+                self.book.levels_for(opposite_side).pop(best_price, None)
+
+        # Any unfilled remainder:
+        if order.remaining > 0 and order.order_type == OrderType.LIMIT:
+            self.book.add_resting_order(order)
+            # Track open order in portfolio if player order
+            if is_player_order and portfolio is not None and ticker:
+                portfolio.register_order(order, ticker)
+        elif is_player_order and portfolio is not None:
+            # Fully filled or market order — ensure it's not in open orders
+            portfolio.remove_open_order(order.order_id)
+
+        # MARKET orders never rest — an unfilled remainder is simply dropped.
+        self.trades.extend(new_trades)
+        return new_trades
+
         """
         Match an incoming order against the book; rest any unfilled LIMIT remainder.
 

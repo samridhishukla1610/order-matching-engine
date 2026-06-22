@@ -111,11 +111,11 @@ label, .stSelectbox label, .stNumberInput label, .stSlider label {
 # Tickers & session state bootstrap
 # ---------------------------------------------------------------------------
 TICKERS = {
-    "RELIANCE": {"mid": 2950.0,  "spread": 2.50,  "drift": 5.0},
-    "TCS":      {"mid": 3820.0,  "spread": 3.00,  "drift": 6.0},
-    "INFY":     {"mid": 1480.0,  "spread": 1.50,  "drift": 3.0},
-    "HDFC":     {"mid": 1650.0,  "spread": 1.50,  "drift": 3.5},
-    "NIFTY50":  {"mid": 24500.0, "spread": 10.0,  "drift": 20.0},
+    "RELIANCE":  {"mid": 2950.0, "spread": 2.50, "drift": 5.0},
+    "TCS":       {"mid": 3820.0, "spread": 3.00, "drift": 6.0},
+    "INFY":      {"mid": 1480.0, "spread": 1.50, "drift": 3.0},
+    "HDFC":      {"mid": 1650.0, "spread": 1.50, "drift": 3.5},
+    "NIFTYBEES": {"mid": 245.0,  "spread": 0.10, "drift": 0.20},  # ETF proxy for NIFTY50
 }
 
 def _init_state():
@@ -233,9 +233,10 @@ best_ask = engine.book.best_price(Side.SELL)
 spread_val = f"{(best_ask - best_bid):.2f}" if (best_bid and best_ask) else "—"
 last_px    = last_prices[ticker]
 
+ticker_label = f"{ticker} (ETF proxy)" if ticker == "NIFTYBEES" else ticker
 st.markdown(f"""
 <div class="ticker-bar">
-    <span class="ticker-dot"></span><span class="ticker-live">{ticker}</span>
+    <span class="ticker-dot"></span><span class="ticker-live">{ticker_label}</span>
     <span class="ticker-item">LAST<b>₹{last_px:,.2f}</b></span>
     <span class="ticker-item">BID<b>{f"₹{best_bid:,.2f}" if best_bid else "—"}</b></span>
     <span class="ticker-item">ASK<b>{f"₹{best_ask:,.2f}" if best_ask else "—"}</b></span>
@@ -266,17 +267,31 @@ with col_entry:
     )
     qty_input = st.number_input("Quantity (shares)", value=10, step=1, min_value=1)
 
-    # Validation
+    # Validation — Fix 3 & 4: covers all order types and sides
     side_enum = Side[side_str]
     warning_msg = None
-    if warning_msg is None and order_type == "LIMIT" and side_enum == Side.BUY:
-        cost = price_input * qty_input
-        if not portfolio.can_afford(price_input, qty_input):
-            warning_msg = f"Insufficient cash. Need ₹{cost:,.2f}, have ₹{portfolio.cash:,.2f}."
-    if order_type == "LIMIT" and side_enum == Side.SELL:
+    qty_to_submit = int(qty_input)
+
+    if side_enum == Side.BUY:
+        if order_type == "LIMIT":
+            cost = price_input * qty_to_submit
+            if not portfolio.can_afford(price_input, qty_to_submit):
+                warning_msg = f"Insufficient cash. Need ₹{cost:,.2f}, have ₹{portfolio.cash:,.2f}."
+        else:  # MARKET BUY — Fix 3: cap to max affordable at best ask
+            if best_ask:
+                max_affordable = int(portfolio.cash // best_ask)
+                if max_affordable == 0:
+                    warning_msg = f"Insufficient cash. Best ask ₹{best_ask:,.2f}, you have ₹{portfolio.cash:,.2f}."
+                elif qty_to_submit > max_affordable:
+                    qty_to_submit = max_affordable
+                    st.info(f"Quantity capped to {max_affordable} shares (max affordable at best ask ₹{best_ask:,.2f}).")
+            else:
+                warning_msg = "No liquidity — cannot place market buy."
+
+    else:  # SELL — Fix 4: guard applies to BOTH limit and market sells
         held = portfolio.positions.get(ticker, 0)
-        if held < qty_input:
-            warning_msg = f"You only hold {held} shares of {ticker}."
+        if held < qty_to_submit:
+            warning_msg = f"You only hold {held} shares of {ticker}. Cannot sell {qty_to_submit}."
 
     if warning_msg:
         st.markdown(f'<div class="warn">⚠ {warning_msg}</div>', unsafe_allow_html=True)
@@ -285,22 +300,27 @@ with col_entry:
     if st.button("Submit Order", type="primary", disabled=submit_disabled):
         order = Order(
             side=side_enum,
-            price=price_input if order_type == "LIMIT" else 0,
-            quantity=int(qty_input),
+            price=round(price_input, 2) if order_type == "LIMIT" else 0,
+            quantity=qty_to_submit,
             order_type=OrderType[order_type],
         )
-        trades = engine.process_order(
-            order,
-            portfolio=portfolio,
-            ticker=ticker,
-            is_player_order=True,
-        )
-        # Record latest price from any fills
+        try:
+            trades = engine.process_order(
+                order,
+                portfolio=portfolio,
+                ticker=ticker,
+                is_player_order=True,
+            )
+        except ValueError as e:
+            # Fix 1 — wash trade rejection surfaces here
+            st.error(str(e))
+            trades = []
+
         if trades:
             price_hist[ticker].append((time.time(), trades[-1].price))
             filled_qty = sum(t.quantity for t in trades)
             st.success(f"{len(trades)} trade(s) — {filled_qty} units @ ₹{trades[-1].price:,.2f}")
-        else:
+        elif not trades and not warning_msg:
             msg = "Order resting in book." if order_type == "LIMIT" else "No liquidity to fill."
             st.info(msg)
 
