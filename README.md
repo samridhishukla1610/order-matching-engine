@@ -15,7 +15,7 @@ Most people treat stock trading as a black box — you click buy, something happ
 ## Features
 
 - **Virtual ₹1,00,000 paper trading** — real cash/position tracking, P&L, order validation
-- **5 Indian tickers** — RELIANCE, TCS, INFY, HDFC, NIFTY50 each with their own independent order book
+- **5 Indian tickers** — RELIANCE, TCS, INFY, HDFC, NIFTYBEES (ETF proxy) each with their own independent order book
 - **Market maker bot** — continuously posts bid/ask quotes with a drifting mid price so there's always liquidity
 - **Live price chart** — trade executions plotted over time per ticker
 - **Open order management** — view and cancel individual resting limit orders
