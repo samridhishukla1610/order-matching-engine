@@ -1,6 +1,6 @@
 # 📈 Order Matching Engine — Paper Trading Terminal
 
-https://github.com/samridhishukla1610/order-matching-engine/raw/main/VID-20260623-WA0024-ezgif.com-gif-maker.mp4
+<video src="https://github.com/samridhishukla1610/order-matching-engine/raw/main/VID-20260623-WA0024-ezgif.com-gif-maker.mp4" controls width="100%"></video>
 
 A fully functional **limit order book matching engine** with a live paper-trading terminal built in Python + Streamlit. Start with **₹1,00,000 virtual cash** and trade 5 simulated Indian market tickers against a market-maker bot.
 
