@@ -203,6 +203,7 @@ pos_str = ", ".join(f"{t}: {q:+d}" for t, q in active_pos.items()) if active_pos
 st.markdown(f"""
 <div class="pf-grid">
   <div class="pf-card"><div class="pf-label">Cash</div><div class="pf-value gold">₹{portfolio.cash:,.2f}</div></div>
+  <div class="pf-card"><div class="pf-label">Available Cash</div><div class="pf-value gold">₹{portfolio.available_cash():,.2f}</div></div>
   <div class="pf-card"><div class="pf-label">Total Equity</div><div class="pf-value">₹{equity:,.2f}</div></div>
   <div class="pf-card"><div class="pf-label">P&amp;L</div><div class="pf-value {pnl_cls}">{pnl_sign}₹{pnl:,.2f} ({pnl_sign}{pnl_pct:.2f}%)</div></div>
   <div class="pf-card"><div class="pf-label">Positions</div><div class="pf-value" style="font-size:.9rem">{pos_str}</div></div>
@@ -276,12 +277,12 @@ with col_entry:
         if order_type == "LIMIT":
             cost = price_input * qty_to_submit
             if not portfolio.can_afford(price_input, qty_to_submit):
-                warning_msg = f"Insufficient cash. Need ₹{cost:,.2f}, have ₹{portfolio.cash:,.2f}."
+                warning_msg = f"Insufficient cash. Need ₹{cost:,.2f}, available ₹{portfolio.available_cash():,.2f} (₹{portfolio.reserved_cash():,.2f} reserved in open orders)."
         else:  # MARKET BUY — Fix 3: cap to max affordable at best ask
             if best_ask:
-                max_affordable = int(portfolio.cash // best_ask)
+                max_affordable = int(portfolio.available_cash() // best_ask)
                 if max_affordable == 0:
-                    warning_msg = f"Insufficient cash. Best ask ₹{best_ask:,.2f}, you have ₹{portfolio.cash:,.2f}."
+                    warning_msg = f"Insufficient cash. Best ask ₹{best_ask:,.2f}, available ₹{portfolio.available_cash():,.2f}."
                 elif qty_to_submit > max_affordable:
                     qty_to_submit = max_affordable
                     st.info(f"Quantity capped to {max_affordable} shares (max affordable at best ask ₹{best_ask:,.2f}).")
