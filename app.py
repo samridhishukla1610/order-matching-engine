@@ -299,6 +299,15 @@ with col_entry:
 
     submit_disabled = warning_msg is not None
     if st.button("Submit Order", type="primary", disabled=submit_disabled):
+        # Hard guard — re-validate inside the handler so a Streamlit rerun
+        # race can never execute an order that failed validation
+        if warning_msg is not None:
+            st.error("Order blocked by validation. Please review the warning above.")
+            st.stop()
+        if qty_to_submit <= 0:
+            st.error("Quantity must be at least 1.")
+            st.stop()
+
         order = Order(
             side=side_enum,
             price=round(price_input, 2) if order_type == "LIMIT" else 0,
